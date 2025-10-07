@@ -67,8 +67,6 @@ while getopts "$optspec" optchar; do
         j)  json=1
             ;;
         p)  parts=1
-            # FIXME
-            err "-p is not implemented yet"
             ;;
         d)  dump=1
             ;;
@@ -161,6 +159,19 @@ if [[ -n $DELL_API_KEY ]] && [[ -n $DELL_API_SEC ]]; then
 
         # w_stat check latest exp date compare to now
         [[ $w_expdate -ge $(date +%s) ]] && w_stat="Active" || w_stat="Expired"
+    fi
+
+    # Extract components if requested
+    if [[ $parts == 1 ]]; then
+        # Check if components exist in the response
+        if [[ $(jq '.components | length' <<< "$o") -gt 0 ]]; then
+            declare -A comp_desc comp_part comp_qty comp_tech
+            eval "$(jq -r '.components[] |
+                "comp_desc["+(.itemNumber|@sh)+"]="+(.itemDescription | @sh) + "\n" +
+                "comp_tech["+(.itemNumber|@sh)+"]="+(.partDescription | @sh) + "\n" +
+                "comp_part["+(.itemNumber|@sh)+"]="+(.partNumber | @sh) + "\n" +
+                "comp_qty["+(.itemNumber|@sh)+"]="+(.partQuantity|tostring | @sh)' <<< "$o")"
+        fi
     fi
 
 # no API credentials, scraping the public web site
@@ -258,6 +269,20 @@ else
             <<< "$w_info")
     done
 
+    # Extract components if requested
+    if [[ $parts == 1 ]]; then
+        # Parse component details from configuration
+        comp_num=$(pup 'table.components tbody tr' <<< "$c_details" | grep -c '<tr' || echo 0)
+        if [[ $comp_num -gt 0 ]]; then
+            declare -A comp_desc comp_part comp_qty
+            for i in $(seq 1 "$comp_num"); do
+                comp_desc[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(1) text{}" <<< "$c_details" | xargs)
+                comp_part[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(2) text{}" <<< "$c_details" | xargs)
+                comp_qty[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(3) text{}" <<< "$c_details" | xargs)
+            done
+        fi
+    fi
+
 fi
 
 ## display --------------------------------------------------------------------
@@ -278,14 +303,37 @@ if [[ $json == 1 ]]; then
                    end_date="$(date -d"${w_expir_d[$i]}" -I)")
     done
     srv_jarr=$(jo -a "${srv[@]}")
-    jo -p product="$c_prod" \
-          svctag="$svctag" \
-          ship_date="$(date_conv "$w_shpdate")" \
-          country="${w_ctry:-n/a}" \
-          warranty_type="${w_type:-n/a}" \
-          warranty_status="${w_stat:-n/a}" \
-          warranty_expiration_date="$(date_conv "$w_expdate")" \
-          support_services="$srv_jarr"
+
+    # Add components to JSON output if -p flag was used
+    if [[ $parts == 1 ]] && [[ ${#comp_desc[@]} -gt 0 ]]; then
+        declare -A cmp
+        for i in ${!comp_desc[*]}; do
+            cmp[$i]=$(jo description="${comp_desc[$i]}" \
+                         reference="${comp_tech[$i]:-n/a}" \
+                         part_number="${comp_part[$i]:-n/a}" \
+                         quantity="${comp_qty[$i]:-1}")
+        done
+        comp_jarr=$(jo -a "${cmp[@]}")
+
+        jo -p product="$c_prod" \
+              svctag="$svctag" \
+              ship_date="$(date_conv "$w_shpdate")" \
+              country="${w_ctry:-n/a}" \
+              warranty_type="${w_type:-n/a}" \
+              warranty_status="${w_stat:-n/a}" \
+              warranty_expiration_date="$(date_conv "$w_expdate")" \
+              support_services="$srv_jarr" \
+              components="$comp_jarr"
+    else
+        jo -p product="$c_prod" \
+              svctag="$svctag" \
+              ship_date="$(date_conv "$w_shpdate")" \
+              country="${w_ctry:-n/a}" \
+              warranty_type="${w_type:-n/a}" \
+              warranty_status="${w_stat:-n/a}" \
+              warranty_expiration_date="$(date_conv "$w_expdate")" \
+              support_services="$srv_jarr"
+    fi
     exit
 fi
 
@@ -312,4 +360,17 @@ else
         echo "   end   date: $(date_conv "${w_expir_d[$i]}")"
     echo "-------------------------------------------"
     done
+
+    # Display components if -p flag was used
+    if [[ $parts == 1 ]] && [[ ${#comp_desc[@]} -gt 0 ]]; then
+        echo " Components"
+        echo "-------------------------------------------"
+        for i in ${!comp_desc[*]}; do
+            echo " ${comp_desc[$i]}" | fmt -w 45
+            [[ -n ${comp_tech[$i]} ]] && echo "   rrf: ${comp_tech[$i]}"
+            [[ -n ${comp_part[$i]} ]] && echo "   p/n: ${comp_part[$i]}"
+            [[ -n ${comp_qty[$i]}  ]] && echo "   qty: ${comp_qty[$i]}"
+            echo "-------------------------------------------"
+        done
+    fi
 fi
