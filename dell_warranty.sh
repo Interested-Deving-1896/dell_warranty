@@ -127,6 +127,20 @@ if [[ -n $DELL_API_KEY ]] && [[ -n $DELL_API_SEC ]]; then
     # - asset-entitlements (input: servicetags)
     # - asset-entitlement-components (input: servictag)
     o=$(_api "asset-entitlement-components" "servicetag=$svctag")
+
+	# Check if response is valid JSON
+	if ! jq empty <<< "$o" 2>/dev/null; then
+		# Check for common error responses
+		if [[ "$o" =~ "429" ]] && [[ "$o" =~ "Ratelimit" ]]; then
+			err "API rate limit exceeded. Please try again later."
+		elif [[ "$o" =~ "<soapenv:Fault>" ]]; then
+			fault=$(grep -oP '(?<=<faultstring>)[^<]+' <<< "$o" 2>/dev/null || echo "Unknown API error")
+			err "API error: $fault"
+		else
+			err "Invalid API response (not JSON)"
+		fi
+	fi
+
     [[ $(jq -r .invalid <<< "$o") == "true" ]] &&
         err "service tag not found ($svctag)"
 
