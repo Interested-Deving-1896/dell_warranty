@@ -297,7 +297,12 @@ put it on \$PATH, or set \$DELL_CURL_IMPERSONATE to its path."
         _e=$(date +%s --date="${w_expir_d[$i]}" 2>/dev/null) || _e=0
         (( _e > w_expdate )) && w_expdate=$_e
     done
-    [[ $w_expdate -gt 0 && $w_expdate -ge $(date +%s) ]] && w_stat="Active" || w_stat="Expired"
+    if [[ $w_expdate -gt 0 ]]; then
+        [[ $w_expdate -ge $(date +%s) ]] && w_stat="Active" || w_stat="Expired"
+    else
+        w_stat="n/a"
+        w_expdate="n/a"
+    fi
 
     # no entitlements parsed: mirror the API path's n/a handling
     if [[ $w_num -eq 0 ]]; then w_type="n/a"; w_stat="n/a"; w_expdate="n/a"; fi
