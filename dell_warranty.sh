@@ -327,8 +327,8 @@ if [[ $json == 1 ]]; then
     # shellcheck disable=SC2004
     for i in ${!w_service[*]}; do
       srv[$i]=$(jo service="${w_service[$i]}" \
-                   start_date="$(date -d"${w_start_d[$i]}" -I)" \
-                   end_date="$(date -d"${w_expir_d[$i]}" -I)")
+                   start_date="$(date_conv "${w_start_d[$i]}")" \
+                   end_date="$(date_conv "${w_expir_d[$i]}")")
     done
     srv_jarr=$(jo -a "${srv[@]}")
 
