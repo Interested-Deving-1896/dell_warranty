@@ -46,7 +46,7 @@ Usage:  $s [-j] [-e] <service_tag>
         -e  only display the warranty expiration date
         -p  list components
 
-API credentials must be provided either:
+API credentials are optional; for the API path, provide them either:
 - in a .creds file located in the same directory as the script, containing a
   single "apikey:secret" line
 - as environment variables: DELL_API_KEY and DELL_API_SEC
