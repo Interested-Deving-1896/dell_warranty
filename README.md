@@ -42,8 +42,8 @@ For the CLI:
 * [curl-impersonate](https://github.com/lexiforest/curl-impersonate): browser
   TLS fingerprint, required only by the scrape fallback (no API credentials).
   Put it on `PATH`, drop the binary next to `dell_warranty.sh`, or point
-  `DELL_CURL_IMPERSONATE` at it. Running the script with none present prints the
-  exact download command for your platform.
+  `DELL_CURL_IMPERSONATE` at it. Running the script with none present explains where
+  to download it and how to make it discoverable.
 
 To run the API server:
 * [shell2http](https://github.com/msoap/shell2http): a HTTP server for shell
