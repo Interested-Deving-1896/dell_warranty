@@ -1,6 +1,6 @@
 #!/bin/bash
-# retrive warranty and parts information about Dell equipment, using the Dell
-# Warranty API
+# retrieve warranty and parts information about Dell equipment, using the Dell
+# Warranty API (or the public support site as a fallback when no API creds)
 
 [[ $DEBUG == 1 ]] && set -x
 
@@ -10,7 +10,8 @@ declare -A req_urls
 req_urls=(  [curl]="https://curl.se/"
             [pup]="https://github.com/ericchiang/pup"
             [jq]="http://stedolan.github.io/jq"
-            [jo]="https://github.com/jpmens/jo" )
+            [jo]="https://github.com/jpmens/jo"
+            [curl-impersonate]="https://github.com/lexiforest/curl-impersonate" )
 
 
 # functions -------------------------------------------------------------------
@@ -45,7 +46,7 @@ Usage:  $s [-j] [-e] <service_tag>
         -e  only display the warranty expiration date
         -p  list components
 
-API credentials must br provided either:
+API credentials must be provided either:
 - in a .creds file located in the same directory as the script, containing a
   single "apikey:secret" line
 - as environment variables: DELL_API_KEY and DELL_API_SEC
@@ -125,21 +126,21 @@ if [[ -n $DELL_API_KEY ]] && [[ -n $DELL_API_SEC ]]; then
     # API request
     # - assets (input: servicetags)
     # - asset-entitlements (input: servicetags)
-    # - asset-entitlement-components (input: servictag)
+    # - asset-entitlement-components (input: servicetag)
     o=$(_api "asset-entitlement-components" "servicetag=$svctag")
 
-	# Check if response is valid JSON
-	if ! jq empty <<< "$o" 2>/dev/null; then
-		# Check for common error responses
-		if [[ "$o" =~ "429" ]] && [[ "$o" =~ "Ratelimit" ]]; then
-			err "API rate limit exceeded. Please try again later."
-		elif [[ "$o" =~ "<soapenv:Fault>" ]]; then
-			fault=$(grep -oP '(?<=<faultstring>)[^<]+' <<< "$o" 2>/dev/null || echo "Unknown API error")
-			err "API error: $fault"
-		else
-			err "Invalid API response (not JSON)"
-		fi
-	fi
+    # Check if response is valid JSON
+    if ! jq empty <<< "$o" 2>/dev/null; then
+        # Check for common error responses
+        if [[ "$o" =~ "429" ]] && [[ "$o" =~ "Ratelimit" ]]; then
+            err "API rate limit exceeded. Please try again later."
+        elif [[ "$o" =~ "<soapenv:Fault>" ]]; then
+            fault=$(grep -oP '(?<=<faultstring>)[^<]+' <<< "$o" 2>/dev/null || echo "Unknown API error")
+            err "API error: $fault"
+        else
+            err "Invalid API response (not JSON)"
+        fi
+    fi
 
     [[ $(jq -r .invalid <<< "$o") == "true" ]] &&
         err "service tag not found ($svctag)"
@@ -188,113 +189,121 @@ if [[ -n $DELL_API_KEY ]] && [[ -n $DELL_API_SEC ]]; then
         fi
     fi
 
-# no API credentials, scraping the public web site
+# no API credentials: fall back to scraping Dell's support site. This needs
+# curl-impersonate (browser TLS fingerprint) and an _abck session cookie from
+# DELL_ABCK, or the hardcoded default below. The cookie is short-lived and
+# Akamai may block once it degrades, so this path is best-effort.
 else
 
     # mic check
-    check_req curl pup jo
+    check_req pup jo
 
-    # URLs
+    # Plain curl is denied by Dell's Akamai Bot Manager on a TLS/HTTP2
+    # fingerprint basis (a correct User-Agent and the cookie are not enough).
+    # curl-impersonate presents a genuine Chrome (BoringSSL) fingerprint, which
+    # clears the bot check. https://github.com/lexiforest/curl-impersonate
+    ci_target=${DELL_IMPERSONATE_TARGET:-chrome146}
+
+    # locate curl-impersonate: $DELL_CURL_IMPERSONATE, then $PATH, then next to
+    # this script (you can just drop the release binary in this directory).
+    ci_bin=$DELL_CURL_IMPERSONATE
+    [[ -z $ci_bin ]] && command -v curl-impersonate >/dev/null 2>&1 && ci_bin=curl-impersonate
+    [[ -z $ci_bin && -x "$script_dir/curl-impersonate" ]] && ci_bin="$script_dir/curl-impersonate"
+    if ! command -v "${ci_bin:-/nonexistent}" >/dev/null 2>&1 && [[ ! -x ${ci_bin:-/nonexistent} ]]; then
+        err "curl-impersonate not found. The scrape path needs it (plain curl is
+blocked by Dell's Akamai bot manager). Download the binary for your platform
+from ${req_urls[curl-impersonate]} and drop it in this directory ($script_dir),
+put it on \$PATH, or set \$DELL_CURL_IMPERSONATE to its path."
+    fi
+
+    # browser-fingerprinted fetch helper (adds the captured session cookie).
+    # --compressed is required: --impersonate sets a br/zstd Accept-Encoding, so
+    # curl must be told to decompress the reply (else the body is binary).
+    _ci() { "$ci_bin" --compressed --impersonate "$ci_target" ${DEBUG:+-v} -sL \
+                      --connect-timeout 15 -H "Cookie: _abck=$_abck" "$@"; }
+
+    # The data endpoints also need an _abck cookie captured from a real browser
+    # session (DELL_ABCK). A captured cookie is short-lived and rate-limited; if
+    # requests start returning "Access Denied", recapture it from a fresh session.
+    _abck=${DELL_ABCK:-'A3AAA92DFCBA5AC8BB1D164241B2B44A~0~YAAQTAw0F+M411+eAQAAjy+DdQ/0fur+OOuwiMl/Sr+1yU0hX95bBUnm57of7I7bpEW/wk7+XN844C/oyfkNVp0GseR6GLaakVtLDUON57vRKsN2SZWiZdL3qxXCflOuJf9wp8PHuILGydMyIGFVhgeMlKMjjmVuonhes1KxR40lhJTZKmQHEMAKwVoACN8mNKeT/ESLKfZVbhi1lrgtxPADTAHcPORAXsWxQftJ4Mj7BtpLE9JIG+/EOKqkazXxLO2jSDc31eG5u1PQaHqbRUPw7p5HHQCYbgODHZQOFIsR/G7LIZRKgHM4vsXxroxbAT6wfSI9/BkzOuAWMGSNSwD0cJD5XTa8uuOvKHj7v2YiUOUgBxua/55vGoCkMMeTcntsc/YVVQRqy5iDXxZSFy4VJ13blsTqxvTrkCEID3K/wbyOmP1klwk7wB/j3BYownGb6p65ZCt1xJugWdDOPXDfKw7//lfrwye3IH8qIcanLliEShJLre3J9P5XSjdYHfWeS5zmNzQAO2EjQ2sviTZBUz3R5FVKH3907dktOoDmIk1R536peBjwnk9m3PCIJCalv3VgtNilC5B+8xQ+5py8OX0Ov1kk6+Neq70mQK5LWfhyEZEcpRnsMyncXk8HE9/47E9pwUsPMGuwYUb7q1WTBYi1sEmQhvrtdUVDiGEVXcnLNfuM1wIKI5qJ2MAX3x4iF2d8CRTuZDKw8RkKQS2qJ1oWCZlgLLZEelqfcngzRexJPCJmW8yx+tisKLvPk0+F1pzxHkfmjRo7tvS62zr8JVhxU7U5RxHon+h1EppseZFWvZfj5Mh3X0xM+kvJl38xSE17twXmeVKbhzjF7ilX09w5d18occE5AUdCRb6ZqzZE2oPKwCaH/Xj/HA/h3cn/5+BMLcuzQBMA+ZCJRjKg1O77z7dzAlY5pcg=~-1~-1~-1~AAQAAAAF%2f%2f%2f%2f%2f1ttIB1CVGbdRMwA4ln4EPGc7G+Erf4gSx4UBbEgwhRlk0lFwi%2fA3qfIzDz1S6HVL80VgaIAsj3dKztkStyk5CHgEzvRFv6t77ElFN2PKsZQCNMbR2bcQQTryX9EvSPcmQ%2fdl8w%3d~-1'}
+
     url_root="https://www.dell.com/support"
-    url_comp="$url_root/components/dashboard/en-us"
+    tag_url="$url_root/product-details/en-us/servicetag"
 
-    url_w_inf="$url_root/warranty/en-us/warrantydetails/servicetag"
-    url_c_det="$url_comp/Configuration/GetConfiguration"
-    url_overview="$url_root/home/en-us/product-support/servicetag"
+    # The warranty endpoints key off Dell's encrypted asset id (no longer
+    # 0-base64(servicetag)). The overview page embeds it as "ServiceTag":"0-...",
+    # so resolve it from the raw service tag first.
+    overview=$(_ci "$tag_url/$svctag/overview")
+    if [[ "$overview" =~ "Access Denied" ]] && [[ "$overview" =~ "Reference" ]]; then
+        err "Akamai blocked the request (fingerprint or _abck rate-limit). Recapture DELL_ABCK from a fresh browser session."
+    fi
+    ident=$(grep -oE '"ServiceTag":"0-[^"]+"' <<< "$overview" | head -1 | grep -oE '0-[^"]+')
+    [[ -z $ident ]] && err "could not resolve asset id for $svctag (invalid tag or blocked)"
+    referer="$tag_url/$ident/overview"
 
-    [[ -z $DELL_ABCK ]] && _abck="$DELL_ABCK" || \
-    _abck="17D5BD1B272492D9DEB654A253A0ECD0~0~YAAQtTkZuE3yVy+GAQAAbQVYTAkUTP+O"
-    _abck+="n/0FtQxI05TbVXuLNxUPbUq3G0cxEGssUhv/TqIewPjqw5SLOOmZ7Ii0Hr18GSfm0Z"
-    _abck+="k7I0q6K+9lyp1xLhUbL3OgdzAffpUHtPAgDSUBMPXsIlh9otHiY7C0sBZ0DIXgDrKP"
-    _abck+="ph60866aCaVFjEuZ4SnOGNi6Gp7auOOxcgOuslRChBJisvFiEMw7QUlDADbwc3Vy3v"
-    _abck+="Omg6ctKmDG6HwesCsRjYCUB5TjPKveW6tudKJsEu1kKW7kKAUIg4LqpGYilGZbgYlW"
-    _abck+="72uBTR7jvImCUpNMAEDd9agmBqs4DH3Vg8Vh+idLokyoKesvw1xbB5GN+WyNFC/DgE"
-    _abck+="sqrTYSDZyGS8yx4PIjfsAEnzlfqMrTuB1hirvBRn87bZ28llbH~-1~-1~-1"
+    # Product name comes from the overview page; the warranty endpoints no
+    # longer carry it.
+    c_prod=$(grep -oE '"ProductName":"[^"]+"' <<< "$overview" | head -1 | sed -E 's/.*:"(.*)"/\1/')
+    [[ -z "$c_prod" ]] && c_prod=$(pup 'title text{}' <<< "$overview" | sed -E 's/ *\|.*//' | xargs)
 
-    # set default HTTPie options
-    _http() { # $1: URL
-        local url=$1
-        curl  ${DEBUG:+-v} -sL --connect-timeout 5 "$url" \
-             -H "Accept-Language: en-us" \
-             -H "Accept-Encoding: identity" \
-             -H "Content-Type: application/x-www-form-urlencoded" \
-             -H "Origin: https://support.dell.com" \
-             -A "Mozilla/5.0" \
-             --cookie "_abck=$_abck"
-    }
+    # Warranty data now lives behind the "View Details" XHR (entitlement/details,
+    # found in the dep-hero.js bundle). It returns an HTML fragment with two
+    # tables: asset info (#WarrantyCmsViewModel-table: Service Tag | Express
+    # Service Code | Ship Date | Location) and per-service entitlements
+    # (#WarrantyCmsViewModel-table3: Service | Start Date | Expiration Date).
+    # The dep-hero JS posts the encrypted asset id without its "0-" prefix.
+    assetid=${ident#0-}
+    w_info=$(_ci -H "Accept: */*" \
+                 -H "Content-Type: application/json" \
+                 -H "X-Robots-Tag: noindex" \
+                 -H "Origin: https://www.dell.com" \
+                 -H "Referer: $referer" \
+                 -X POST \
+                 --data "{\"assetFormat\":\"ServiceTag\",\"assetId\":\"$assetid\",\"appName\":\"DEP\",\"loadScript\":true,\"useDds\":true}" \
+                 "$url_root/contractservices/en-us/entitlement/details")
+    _rc=$?
+    [[ $_rc -ne 0 ]] && \
+        err "request failed (curl-impersonate exit $_rc); check network or DELL_ABCK value"
 
-    # get general info
-    overview=$(_http "$url_overview/$svctag") || err
+    [[ $dump == 1 ]] && echo "$w_info" > "w_info_$svctag.html"
 
-    # check for invalid service tag
-    o_link=$(pup 'meta[rel="channel"] attr{href}' <<< "$overview")
-    # shellcheck disable=SC2076
-    [[ "$o_link" =~ "Selection=$svctag&amp;IsInvalidSelection=True" ]] && \
-        err "service tag not found ($svctag)"
+    # Akamai gate
+    if [[ "$w_info" =~ "Access Denied" ]] && [[ "$w_info" =~ "Reference" ]]; then
+        err "Akamai blocked the request (fingerprint or _abck rate-limit). Recapture DELL_ABCK from a fresh browser session."
+    fi
+    [[ -z "$w_info" ]] && err "no warranty data returned for $svctag"
 
-    # retrieve encrypted service tag from overview
-    s_encryp=$(awk '/encryptedTag = / {print $NF}'   <<< "$overview" | tr -d "';")
-    ## dump save output
-    [[ $dump == 1 ]] && {
-        echo "$overview" > "overview_$svctag.html"
-    }
-    [[ ${s_encryp} == "" ]] && err "s_encryp not found"
+    # asset info table (col 3 = Ship Date, col 4 = Location)
+    asset_row='#WarrantyCmsViewModel-table tr:nth-of-type(2)'
+    w_rshp=$(pup "$asset_row td:nth-of-type(3) text{}" <<< "$w_info" | xargs)
+    w_ctry=$(pup "$asset_row td:nth-of-type(4) text{}" <<< "$w_info" | xargs)
+    w_shpdate=$(date +%s --date="$w_rshp" 2>/dev/null) || w_shpdate="n/a"
 
-
-    # get warranty info
-    w_info=$(_http "$url_w_inf/$s_encryp/mse/IPS?_=f") || err
-
-    # get configuration details
-    c_details=$(_http "$url_c_det?serviceTag=$s_encryp") || err
-
-    ## dump save output
-    [[ $dump == 1 ]] && {
-        echo "$w_info" > "w_info_$svctag.html"
-        echo "$c_details" > "c_details_$svctag.html"
-    }
-
-    # extract nuggets
-    c_prod=$(pup '.product-info h1 text{}' <<< "$overview")
-    w_rexp=$(pup '#expirationDt text{}' <<< "$w_info" | \
-             sed 's/^Expire[sd] \+//')
-
-    w_stat=$(pup '.warrantyExpiringLabel text{}'  <<< "$w_info" | uniq)
-    w_type=$(pup 'p:contains("Current Support Services Plan") span text{}' \
-        <<< "$w_info" | xargs)
-    w_rshp=$(pup ':contains("Ship Date") + div text{}' <<< "$w_info" | head -n1)
-    w_ctry=$(pup ':contains("Location")  + div text{}' <<< "$w_info" | head -n1)
-
-    # conversion
-    w_expdate=$(date +%s --date="$w_rexp") # epoch
-    w_shpdate=$(date +%s --date="$w_rshp") # epoch
-
-    # iterate over service types and dates
-    w_num=$(pup 'thead + tbody > tr' <<< "$w_info" | grep -c '<tr')
+    # per-service entitlements (Service | Start Date | Expiration Date)
+    svc_body='#WarrantyCmsViewModel-table3 tbody'
+    w_num=$(pup "$svc_body tr" <<< "$w_info" | grep -c '<tr')
     # shellcheck disable=SC2004
     for i in $(seq 1 "$w_num"); do
-        w_service[$i]=$(pup \
-            'thead + tbody tr:nth-of-type('"$i"') td:nth-of-type(1) text{}' \
-            <<< "$w_info")
-        w_start_d[$i]=$(pup \
-            'thead + tbody tr:nth-of-type('"$i"') td:nth-of-type(2) text{}' \
-            <<< "$w_info")
-        w_expir_d[$i]=$(pup \
-            'thead + tbody tr:nth-of-type('"$i"') td:nth-of-type(3) text{}' \
-            <<< "$w_info")
+        w_service[$i]=$(pup "$svc_body tr:nth-of-type($i) td:nth-of-type(1) text{}" <<< "$w_info" | xargs)
+        w_start_d[$i]=$(pup "$svc_body tr:nth-of-type($i) td:nth-of-type(2) text{}" <<< "$w_info" | xargs)
+        w_expir_d[$i]=$(pup "$svc_body tr:nth-of-type($i) td:nth-of-type(3) text{}" <<< "$w_info" | xargs)
     done
 
-    # Extract components if requested
+    # headline fields: type = primary (first) plan; expiration = latest end date;
+    # status derived by comparing to now (mirrors the API path).
+    w_type=${w_service[1]:-n/a}
+    w_expdate=0
+    for i in "${!w_expir_d[@]}"; do
+        _e=$(date +%s --date="${w_expir_d[$i]}" 2>/dev/null) || _e=0
+        (( _e > w_expdate )) && w_expdate=$_e
+    done
+    [[ $w_expdate -gt 0 && $w_expdate -ge $(date +%s) ]] && w_stat="Active" || w_stat="Expired"
+
+    # no entitlements parsed: mirror the API path's n/a handling
+    if [[ $w_num -eq 0 ]]; then w_type="n/a"; w_stat="n/a"; w_expdate="n/a"; fi
+
     if [[ $parts == 1 ]]; then
-        # Parse component details from configuration
-        comp_num=$(pup 'table.components tbody tr' <<< "$c_details" | grep -c '<tr' || echo 0)
-        if [[ $comp_num -gt 0 ]]; then
-            declare -A comp_desc comp_part comp_qty
-            for i in $(seq 1 "$comp_num"); do
-                comp_desc[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(1) text{}" <<< "$c_details" | xargs)
-                comp_part[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(2) text{}" <<< "$c_details" | xargs)
-                comp_qty[$i]=$(pup "table.components tbody tr:nth-of-type($i) td:nth-of-type(3) text{}" <<< "$c_details" | xargs)
-            done
-        fi
+        echo "Warning: -p (parts listing) requires API credentials; skipping." >&2
     fi
 
 fi
@@ -381,7 +390,7 @@ else
         echo "-------------------------------------------"
         for i in ${!comp_desc[*]}; do
             echo " ${comp_desc[$i]}" | fmt -w 45
-            [[ -n ${comp_tech[$i]} ]] && echo "   rrf: ${comp_tech[$i]}"
+            [[ -n ${comp_tech[$i]} ]] && echo "   ref: ${comp_tech[$i]}"
             [[ -n ${comp_part[$i]} ]] && echo "   p/n: ${comp_part[$i]}"
             [[ -n ${comp_qty[$i]}  ]] && echo "   qty: ${comp_qty[$i]}"
             echo "-------------------------------------------"
