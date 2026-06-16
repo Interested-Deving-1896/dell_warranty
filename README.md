@@ -1,56 +1,29 @@
+[update-readmes]   Mode: rewrite — migrating to template structure...
 # dell_warranty
-CLI + REST API to check Dell hardware warranty information.
 
-## Description
+[![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/dell_warranty)
 
-`dell_warranty` is a simple script to retrieve warranty information about Dell
-hardware.
+<!-- AI:start:what-it-does -->
+_Description pending._
+<!-- AI:end:what-it-does -->
 
-It pulls information from the [Dell support](support.dell.com) website and
-presents it in either plain-text or JSON format. It can be used as a CLI, or
-as a REST API to facilitate queries via web services.
+## Architecture
 
-### Why?
+<!-- AI:start:architecture -->
+_Architecture documentation pending._
+<!-- AI:end:architecture -->
 
-Dell does provide a Warranty API for its customers. To use it, you'll need to:
-* register for an API key,
-* develop a mechanism to handle OAuth2 authentication,
-* renew tokens every hour,
-* renew your API key every year,
-* make sure you're good at implementing [exponential
-  backoff](https://en.wikipedia.org/wiki/Exponential_backoff),
-* be prepared for inconsistent, inaccurate or simply missing information about
-  your servers.
+## Install
 
-In the meantime, the same information is freely available on
-https://support.dell.com and can be retrieved without any of the inconveniences
-listed above. `dell_warranty` uses that. No API key registration required.
+<!-- Add installation instructions here. This section is yours — the AI will not modify it. -->
 
-
-## Installation
-
-It's a shell script.
-
-
-### Dependencies
-
-For the CLI:
-* `bash`
-* [HTTPie](https://httpie.org): command-line HTTP client
-* [pup](https://github.com/ericchiang/pup): command-line HTML parser
-* [jo](https://github.com/jpmens/jo): command-line JSON generator
-* [curl-impersonate](https://github.com/lexiforest/curl-impersonate): browser
-  TLS fingerprint, required only by the scrape fallback (no API credentials).
-  Put it on `PATH`, drop the binary next to `dell_warranty.sh`, or point
-  `DELL_CURL_IMPERSONATE` at it. Running the script with none present explains where
-  to download it and how to make it discoverable.
-
-To run the API server:
-* [shell2http](https://github.com/msoap/shell2http): a HTTP server for shell
-  commands
-
+```bash
+git clone https://github.com/Interested-Deving-1896/dell_warranty.git
+cd dell_warranty
+```
 
 ## Usage
+
 
 ```
 Usage:  dell_warranty.sh [-j] [-e] <service_tag>
@@ -159,3 +132,50 @@ And then, you can query the API server with:
   }
 ```
 
+## Configuration
+
+<!-- Document configuration options here. This section is yours — the AI will not modify it. -->
+
+## CI
+
+<!-- AI:start:ci -->
+_CI documentation pending._
+<!-- AI:end:ci -->
+
+## Mirror chain
+
+<!-- AI:start:mirror-chain -->
+This repo is maintained in [`Interested-Deving-1896/dell_warranty`](https://github.com/Interested-Deving-1896/dell_warranty) and mirrored through:
+
+```
+Interested-Deving-1896/dell_warranty  ──►  OpenOS-Project-OSP/dell_warranty  ──►  OpenOS-Project-Ecosystem-OOC/dell_warranty
+```
+
+Changes flow downstream automatically via the hourly mirror chain in
+[`fork-sync-all`](https://github.com/Interested-Deving-1896/fork-sync-all).
+Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-Deving-1896`.
+<!-- AI:end:mirror-chain -->
+
+## Contributors
+
+<!-- AI:start:contributors -->
+_Contributors pending._
+<!-- AI:end:contributors -->
+
+## Origins
+
+<!-- AI:start:origins -->
+_Original project — no upstream fork._
+<!-- AI:end:origins -->
+
+## Resources
+
+<!-- AI:start:resources -->
+_No additional resource files found._
+<!-- AI:end:resources -->
+
+## License
+
+<!-- AI:start:license -->
+[GPL-3.0](https://github.com/Interested-Deving-1896/dell_warranty/blob/main/LICENSE) © 2026 [Interested-Deving-1896](https://github.com/Interested-Deving-1896)
+<!-- AI:end:license -->
